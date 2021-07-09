@@ -6,9 +6,17 @@ from klein import Klein
 from prometheus_client import Gauge
 from prometheus_client.twisted import MetricsResource
 
-def is_interesting(data):
-    """Returns true iff this data should not be ignored."""
-    return data["dev_id"].startswith("risinghf") and data["port"] == 8
+def determine_version(data):
+    """Checks if v2 or v3 of TTN is used"""
+    try:
+        v2 = data["dev_id"].startswith("risinghf") and data["port"] == 8
+    except KeyError:
+        v2 = False
+    try:
+        v3 = data["end_device_ids"]["device_id"].startswith("risinghf") and data["uplink_message"]["f_port"] == 8
+    except KeyError:
+        v3 = False
+    return (v2,v3)
 
 def decode_payload(raw):
     """Parses the payload and returns the decoded pair (temperature, humidity)
@@ -37,10 +45,18 @@ def save_item(request):
     request.setHeader('Content-Type', 'application/json')
 
     data = json.loads(request.content.read().decode('utf-8'))
-    if not is_interesting(data): return json.dumps({'success': True})
+    """Determine if either v2 or v3 of TTN is used"""
+    v2, v3 = determine_version(data)
 
-    dev = data["dev_id"]
-    t, h, b = decode_payload(data["payload_raw"])
+    """If none of the two then the data is not of interest"""
+    if not (v2 or v3): return json.dumps({'success': True})
+
+    if v2:
+        dev = data["dev_id"]
+        t, h, b = decode_payload(data["payload_raw"])
+    if v3:
+        dev = data["end_device_ids"]["device_id"]
+        t, h, b = decode_payload(data["uplink_message"]["frm_payload"])
 
     print(" *** device {} sent payload: {}, {}, {}".format(dev, t, h, b))
 
